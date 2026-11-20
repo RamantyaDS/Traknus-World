@@ -157,6 +157,12 @@ function Controller() {
     if (s.mode === 'walk' && !frozen) stepPlayer(dt, frame);
     stepTruck(dt, frame, s.mode === 'truck' && !frozen);
     truckSolids(s.zone ? loaded[s.zone] : null, s.zone);
+    // someone on foot in a zone is solid for its machines too (a forklift that hits them fails its job)
+    const zm = s.zone ? loaded[s.zone] : null;
+    if (zm?.solids && s.mode === 'walk' && s.zone) {
+      const d = ZONES[s.zone];
+      zm.solids.push({ id: 'worker-operator', x: player.x - d.x, z: player.z - d.z, hx: 0.3, hz: 0.3, yaw: 0, y0: player.y, y1: player.y + 1.8 });
+    }
     if (s.mode === 'truck') {
       player.x = truck.x;
       player.z = truck.z;

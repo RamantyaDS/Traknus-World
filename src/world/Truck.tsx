@@ -5,7 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { axis, held } from './input';
-import { collide, groundH } from './physics';
+import { TRUCK_BOXES, collide, groundH } from './physics';
 import { daylight } from './Sky';
 import type { ZoneModule } from '../zones/types';
 import { ZONES, distToZone, type ZoneId } from './map';
@@ -22,29 +22,36 @@ const REAR = [-4.9, -6.3];
 
 /** The truck's solid boxes (truck frame: x across, z forward from the centre): cab, deck, headboard, deck load. */
 const DECK_TOP = 1.38;
-const BOXES = [
-  { x: 0, z: 3.45, hx: 1.25, hz: 1.15, y0: 0.15, y1: 3.2 },
-  { x: 0, z: -1.6, hx: 1.25, hz: 3.3, y0: 0.15, y1: DECK_TOP },
-  { x: 0, z: 1.6, hx: 1.25, hz: 0.12, y0: 1.3, y1: 2.95 },
-];
+const BOXES = TRUCK_BOXES;
 /** The deck as a surface to set a load on (top at DECK_TOP, the headboard ahead of it). */
 const DECK = { x: 0, z: -1.65, hx: 1.2, hz: 3.15, y0: DECK_TOP - 0.2, y1: DECK_TOP };
-/** Two timber bearers across the deck: the load sits on them, so the forks can be drawn out underneath. */
-const TIMBER_Z = [0.65, -3.95];
-const TIMBERS = TIMBER_Z.map((z) => ({ x: 0, z, hx: 1.2, hz: 0.1, y0: DECK_TOP, y1: DECK_TOP + 0.2 }));
-const LOAD = { x: 0, z: -1.6, hx: 1.05, hz: 3.1, y0: 1.38, y1: 3.8 };
+/**
+ * Two timber bearers across the deck, under the ends of a 5.9 m set: the load sits on them, so forks can be drawn
+ * out underneath, and a crane sets it down level on both.
+ */
+const TIMBER_Z = [0.95, -4.25];
+const TIMBERS = TIMBER_Z.map((z) => ({ x: 0, z, hx: 1.2, hz: 0.15, y0: DECK_TOP, y1: DECK_TOP + 0.2 }));
+const LOAD = { x: 0, z: -1.65, hx: 1.1, hz: 2.95, y0: DECK_TOP + 0.2, y1: 3.8 };
+
+/** Is the genset on the deck drawn by the mounted zone's simulator (so the truck leaves its own copy out)? */
+export const deckView = { byZone: false };
 
 /**
- * Hand the truck to the mounted zone's simulator as solid boxes in its own coordinates, so its machine and what it
- * carries stop against the truck instead of passing through it. Empty when the truck is away from the zone.
+ * Hand the truck to the mounted zone's simulator: solid boxes (its machine and what it carries stop against the
+ * truck), the deck and timbers as surfaces to set a load on, and the genset on the deck, which the zone takes over
+ * while the truck is there, so a forklift or crane can lift it off, or set one down that then rides away. All in the
+ * zone's own coordinates; nothing when the truck is away from the zone.
  */
 export function truckSolids(m: ZoneModule | null | undefined, id: ZoneId | null) {
   const list = m?.solids;
-  if (!list || !id) return;
+  if (!m || !list || !id) {
+    deckView.byZone = false;
+    return;
+  }
   list.length = 0;
   if (m.supports) m.supports.length = 0;
   const d = ZONES[id];
-  if (distToZone(d, truck.x, truck.z) > 15) return;
+  const near = distToZone(d, truck.x, truck.z) <= 15;
   const s = Math.sin(truck.yaw);
   const c = Math.cos(truck.yaw);
   const local = (b: typeof LOAD) => ({
@@ -57,25 +64,20 @@ export function truckSolids(m: ZoneModule | null | undefined, id: ZoneId | null)
     y0: truck.y + b.y0,
     y1: truck.y + b.y1,
   });
-  // an empty deck takes a load; one set down there leaves the zone and rides on the truck
-  if (!truck.cargo && m.supports) {
-    m.supports.push(local(DECK), ...TIMBERS.map(local));
-    if (m.loadTruck?.()) {
-      truck.cargo = true;
-      toast('Genset sudah di bak truk Traknus. Ikat muatan — truk siap jalan.', 6000);
-    }
-  }
-  for (const b of truck.cargo ? [...BOXES, LOAD] : BOXES)
-    list.push({
-      id: 'truk',
-      x: truck.x - d.x + b.x * c + b.z * s,
-      z: truck.z - d.z - b.x * s + b.z * c,
-      hx: b.hx,
-      hz: b.hz,
-      yaw: truck.yaw,
-      y0: truck.y + b.y0,
-      y1: truck.y + b.y1,
-    });
+  if (near && m.supports) m.supports.push(local(DECK), ...TIMBERS.map(local));
+  if (m.cargo) {
+    const top = local(TIMBERS[0]).y1;
+    const deck = near ? { ...local(DECK), top, loadYaw: truck.yaw - Math.PI / 2 } : null;
+    const had = truck.cargo;
+    const r = m.cargo(deck, had);
+    truck.cargo = r.has;
+    deckView.byZone = r.shown;
+    if (r.has && !had) toast('Genset sudah di bak truk Traknus — truk siap jalan.', 6000);
+    if (!r.has && had) toast('Genset terangkat dari bak truk.', 4000);
+  } else deckView.byZone = false;
+  if (!near) return;
+  // a load the zone does not draw is the truck's own: solid too
+  for (const b of truck.cargo && !deckView.byZone ? [...BOXES, LOAD] : BOXES) list.push(local(b));
 }
 
 export function stepTruck(dt: number, frame: number, driving: boolean) {
@@ -170,7 +172,7 @@ export function TruckModel() {
       w.rotation.x = truck.wheel;
       w.rotation.y = front.current.includes(w) ? truck.steer : 0;
     }
-    cargo.current!.visible = truck.cargo;
+    cargo.current!.visible = truck.cargo && !deckView.byZone;
     if (truck.cargo && !hasCargo) setHasCargo(true);
   });
   const reg = (o: THREE.Object3D | null, isFront: boolean) => {
@@ -187,7 +189,7 @@ export function TruckModel() {
             buildCab(k, TRAKNUS, { head: lamps.head });
             buildChassis(k, { end: -8.15, rear: REAR, fuelZ: -2.3, batteryZ: -2.1, sideGuard: true });
             buildFlatbed(k, { z0: -1.6, z1: -8.2, firstAxle: REAR[0], lastAxle: REAR[1], lv: TRAKNUS, tail: lamps.tail });
-            for (const z of TIMBER_Z) k.box(TM.wood2, [2.3, 0.2, 0.2], [0, DECK_TOP + 0.1, z - AXLE_F]);
+            for (const z of TIMBER_Z) k.box(TM.wood2, [2.3, 0.2, 0.3], [0, DECK_TOP + 0.1, z - AXLE_F]);
           }}
         />
         {([1, -1] as const).map((s) => (

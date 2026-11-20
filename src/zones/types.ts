@@ -46,8 +46,13 @@ export interface ZoneModule {
   solids?: (Blocker & { id: string })[];
   /** Surfaces a load may be set down on (its EMBED.supports): the world puts the truck's deck there. */
   supports?: (Blocker & { id: string })[];
-  /** A load the player set down on the truck's deck is taken off the zone: true once, when that happens. */
-  loadTruck?(): boolean;
+  /**
+   * The genset on the truck's deck, shared with this zone's simulator. Called every frame with the deck (zone
+   * coordinates, `top` = where a load sits, `loadYaw` = a load lengthwise on it; null when the truck is away) and
+   * whether the truck has the set. The zone puts its own set there while it is, notices it lifted off, or one set
+   * down there, and answers whether the truck has it now and whether the zone is drawing it.
+   */
+  cargo?(deck: (Blocker & { id: string; top: number; loadYaw: number }) | null, has: boolean): { has: boolean; shown: boolean };
   /** Progress the world's missions read: named flags/values. */
   status?(): Record<string, number | boolean | string>;
   /** Mission hooks: prepare the zone for a mission step. */

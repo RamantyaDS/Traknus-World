@@ -247,6 +247,10 @@ const e = new THREE.Euler();
 const v = new THREE.Vector3();
 const sc = new THREE.Vector3();
 
+let planted: ReturnType<typeof plant> | null = null;
+/** Every palm and tree (the same every run): for drawing, and their trunks for collisions. */
+export const plants = () => (planted ??= plant());
+
 /** Palm blocks north of the trunk road, the tropical trees elsewhere: spread over a few chunks so the ones behind the camera are culled. */
 function plant() {
   const palms: Inst[][] = [[], [], [], [], [], []];
@@ -284,7 +288,7 @@ function plant() {
 }
 
 function Trees() {
-  const { palms, trees } = useMemo(plant, []);
+  const { palms, trees } = plants();
   const mats = useMemo(
     () => ({
       trunk: new THREE.MeshStandardMaterial({ color: '#6b5a44', roughness: 1 }),

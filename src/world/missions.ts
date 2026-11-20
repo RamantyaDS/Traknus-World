@@ -8,7 +8,7 @@ export interface Step {
   zone: ZoneId;
   text: string;
   /** Asked of the zone once, when the step starts with that zone mounted (choose the right job). */
-  prepare?: string;
+  prepare?: string | (() => string | undefined);
   /** Run when the step starts. */
   start?: () => void;
   /** True when the step is complete. `st` is the mounted zone's status (empty when another zone is mounted). */
@@ -22,11 +22,14 @@ export interface Mission {
   steps: Step[];
 }
 
+/** The crane's genset arrives on the truck (when the truck has it), else the site's own set. */
+const fromTruck = () => (truck.cargo ? 'fromTruck' : 'genset');
+
 export const MISSIONS: Mission[] = [
   {
     id: 'genset',
     title: 'Genset dari pelabuhan sampai menyala',
-    intro: 'Genset 2250 kVA tiba di pelabuhan. Turunkan dengan forklift, muat ke truk Traknus, kirim ke proyek pabrik, pasang dengan crane, lalu jalankan genset cadangan gedung.',
+    intro: 'Genset 2250 kVA tiba di pelabuhan. Turunkan dengan forklift, muat ke truk Traknus, kirim ke proyek pabrik, bongkar dan pasang dengan crane, lalu jalankan genset cadangan gedung.',
     steps: [
       { zone: 'port', prepare: 'genset', text: 'Pelabuhan: naik forklift dan turunkan genset dari truk ke area letak.', done: (s) => s.job === 'genset' && s.phase === 'done' },
       {
@@ -36,16 +39,14 @@ export const MISSIONS: Mission[] = [
       },
       {
         zone: 'crane',
-        text: 'Genset sudah di bak. Bawa truk Traknus ke Proyek pabrik.',
+        prepare: fromTruck,
+        text: 'Genset sudah di bak. Bawa truk Traknus ke Proyek pabrik dan parkir dalam jangkauan crane.',
         done: () => useWorld.getState().mode === 'truck' && inRect(ZONES.crane, truck.x, truck.z, -2) && Math.abs(truck.v) < 0.5,
       },
       {
         zone: 'crane',
-        prepare: 'genset',
-        text: 'Proyek pabrik: genset sudah diturunkan di area muat. Naik crane RTC-80160 dan pasang genset di rumah genset.',
-        start: () => {
-          truck.cargo = false;
-        },
+        prepare: fromTruck,
+        text: 'Proyek pabrik: naik crane, pasang sling ke genset di bak truk, angkat, lalu pasang di rumah genset.',
         done: (s) => s.genset === true,
       },
       { zone: 'gedung', text: 'Gedung kantor: hidupkan genset cadangan dan ambil alih beban gedung (breaker genset masuk).', done: (s) => s.onLoad === true },
@@ -103,7 +104,8 @@ export function tickMissions(dt: number) {
   const key = `${c.m.id}:${c.i}`;
   if (mod && c.s.prepare && prepared !== key && w.mode !== 'drive') {
     prepared = key;
-    mod.prepare?.(c.s.prepare);
+    const what = typeof c.s.prepare === 'function' ? c.s.prepare() : c.s.prepare;
+    if (what) mod.prepare?.(what);
   }
   const st = mod?.status?.() ?? {};
   if (!c.s.done(st)) return;

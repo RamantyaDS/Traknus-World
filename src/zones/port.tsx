@@ -13,6 +13,10 @@ import type { ZoneModule } from './types';
 
 bindKeys();
 
+/** Where a set that left the yard on the truck is kept; `mine`: the forklift's set is the truck's genset. */
+const AWAY = 1e4;
+let mine = false;
+
 const side = (d: number): [number, number, number] => {
   // step out on the left of the cab (the operator's door), facing the same way as the forklift
   const h = fk.heading;
@@ -25,15 +29,38 @@ const zone: ZoneModule = {
   stations: [{ id: 'forklift', label: 'Naik forklift Toyota 4FD240', pos: () => [fk.x, fk.z], r: 4.2, exit: () => side(2.6) }],
   solids: EMBED.solids,
   supports: EMBED.supports,
-  loadTruck() {
+  cargo(deck, has) {
     const c = fk.cargo;
-    const deck = EMBED.supports[0];
-    // resting on the deck or on its timbers, the forks drawn out
-    if (!deck || c.state !== 'rest' || c.y < deck.y1 - 0.05 || c.y > deck.y1 + 0.3 || !inside(deck, c.x, c.z) || !forksClear(fk)) return false;
-    // the set rides away on the truck: take it out of the yard
-    c.x = 1e4;
-    c.z = 1e4;
-    return true;
+    if (has) {
+      // the yard's own set is somewhere else: the truck's genset stays the truck's
+      if (!mine && c.x < AWAY - 1) return { has, shown: false };
+      mine = true;
+      if (c.state === 'forks') {
+        mine = false; // lifted off the deck
+        return { has: false, shown: false };
+      }
+      if (c.state !== 'rest') {
+        mine = false;
+        return { has: false, shown: false };
+      }
+      if (!deck) {
+        c.x = AWAY;
+        c.z = AWAY;
+        return { has: true, shown: false };
+      }
+      // it rides on the deck (timbers)
+      c.x = deck.x;
+      c.z = deck.z;
+      c.y = deck.top;
+      c.yaw = deck.loadYaw;
+      return { has: true, shown: true };
+    }
+    // set down on the deck or its timbers, the forks drawn out: now it rides with the truck
+    if (deck && c.state === 'rest' && c.y > deck.y1 - 0.05 && c.y < deck.y1 + 0.3 && inside(deck, c.x, c.z) && forksClear(fk)) {
+      mine = true;
+      return { has: true, shown: true };
+    }
+    return { has: false, shown: false };
   },
   blockers: () => [...OBSTACLES.filter((o) => o.y1 > 0.45 && o.y0 < 1.8), ...DYNAMIC, ...footprint(fk)],
   enter() {

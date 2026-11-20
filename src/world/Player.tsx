@@ -30,7 +30,7 @@ export function stepPlayer(dt: number, frame: number) {
   const oz = player.z;
   player.x += Math.sin(player.yaw) * player.speed * dt;
   player.z += Math.cos(player.yaw) * player.speed * dt;
-  collide(player, 0.35, player.y, 1.8, 0.45, frame);
+  collide(player, 0.35, player.y, 1.8, 0.45, frame, true);
   // no walking into the sea or off the map
   const g = groundH(player.x, player.z);
   if (g < SEA_Y + 0.2) {
