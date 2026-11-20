@@ -1,0 +1,15 @@
+[submodule "sims/Forklif-Simulator"]
+	path = sims/Forklif-Simulator
+	url = https://github.com/RamantyaDS/Forklif-Simulator.git
+[submodule "sims/Crane-Simulator"]
+	path = sims/Crane-Simulator
+	url = https://github.com/RamantyaDS/Crane-Simulator.git
+[submodule "sims/Excavator-Simulator"]
+	path = sims/Excavator-Simulator
+	url = https://github.com/RamantyaDS/Excavator-Simulator.git
+[submodule "sims/Tractor-Simulator"]
+	path = sims/Tractor-Simulator
+	url = https://github.com/RamantyaDS/Tractor-Simulator.git
+[submodule "sims/Genset-Simulator"]
+	path = sims/Genset-Simulator
+	url = https://github.com/RamantyaDS/Genset-Simulator.git
