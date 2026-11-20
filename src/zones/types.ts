@@ -42,6 +42,8 @@ export interface ZoneModule {
   noShadows?: boolean;
   setNight?(on: boolean): void;
   setRain?(on: boolean): void;
+  /** The simulator's list of world solids (its EMBED.solids): the world puts the truck there, in zone coordinates. */
+  solids?: (Blocker & { id: string })[];
   /** Progress the world's missions read: named flags/values. */
   status?(): Record<string, number | boolean | string>;
   /** Mission hooks: prepare the zone for a mission step. */

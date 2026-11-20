@@ -37,6 +37,7 @@ const zone: ZoneModule = {
     },
   ],
   groundAt: (x, z) => (inExcavation(x, z) ? -EXCAVATION.depth : 0),
+  solids: EMBED.solids,
   blockers: () => [...OBSTACLES.filter((o) => o.y1 > 0.45 && o.y0 < 1.8), body(), ...cr.loads.filter((l) => l.state !== 'air').map((l) => loadBox(l, l.x, l.y, l.z))],
   enter() {
     void ensureAudio();

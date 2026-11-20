@@ -29,6 +29,7 @@ const zone: ZoneModule = {
     },
   ],
   groundAt: (x, z) => height(x, z),
+  solids: EMBED.solids,
   blockers: () => [...palms, bin, { x: tr.x, z: tr.z, hx: 1.2, hz: 2.2, yaw: tr.heading, y0: tr.y, y1: tr.y + 3 }],
   enter() {
     void ensureAudio();

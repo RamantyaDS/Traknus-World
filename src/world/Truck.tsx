@@ -7,6 +7,8 @@ import * as THREE from 'three';
 import { axis, held } from './input';
 import { collide, groundH } from './physics';
 import { daylight } from './Sky';
+import type { ZoneModule } from '../zones/types';
+import { ZONES, distToZone, type ZoneId } from './map';
 import { truck, useWorld } from './state';
 import { SEA_Y } from './terrain';
 import { KitMesh, TRAKNUS, TruckWheel, buildCab, buildChassis, buildFlatbed } from '@forklift/scene/truckKit';
@@ -17,6 +19,39 @@ const HALF = { x: 1.25, z: 4.6 };
 /** Front axle and the tandem axles (truck frame, z forward from the centre). */
 const AXLE_F = 3.3;
 const REAR = [-4.9, -6.3];
+
+/** The truck's solid boxes (truck frame: x across, z forward from the centre): cab, deck, headboard, deck load. */
+const BOXES = [
+  { x: 0, z: 3.45, hx: 1.25, hz: 1.15, y0: 0.15, y1: 3.2 },
+  { x: 0, z: -1.6, hx: 1.25, hz: 3.3, y0: 0.15, y1: 1.4 },
+  { x: 0, z: 1.6, hx: 1.25, hz: 0.12, y0: 1.3, y1: 2.95 },
+];
+const LOAD = { x: 0, z: -1.6, hx: 1.05, hz: 3.1, y0: 1.38, y1: 3.8 };
+
+/**
+ * Hand the truck to the mounted zone's simulator as solid boxes in its own coordinates, so its machine and what it
+ * carries stop against the truck instead of passing through it. Empty when the truck is away from the zone.
+ */
+export function truckSolids(m: ZoneModule | null | undefined, id: ZoneId | null) {
+  const list = m?.solids;
+  if (!list || !id) return;
+  list.length = 0;
+  const d = ZONES[id];
+  if (distToZone(d, truck.x, truck.z) > 15) return;
+  const s = Math.sin(truck.yaw);
+  const c = Math.cos(truck.yaw);
+  for (const b of truck.cargo ? [...BOXES, LOAD] : BOXES)
+    list.push({
+      id: 'truk',
+      x: truck.x - d.x + b.x * c + b.z * s,
+      z: truck.z - d.z - b.x * s + b.z * c,
+      hx: b.hx,
+      hz: b.hz,
+      yaw: truck.yaw,
+      y0: truck.y + b.y0,
+      y1: truck.y + b.y1,
+    });
+}
 
 export function stepTruck(dt: number, frame: number, driving: boolean) {
   const t = truck;

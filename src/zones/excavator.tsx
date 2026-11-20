@@ -36,6 +36,7 @@ const zone: ZoneModule = {
     },
   ],
   groundAt: (x, z) => heightAt(ex.terrain, x, z),
+  solids: EMBED.solids,
   blockers: () => {
     const h = heading();
     const list: Blocker[] = [{ x: ex.p.x, z: ex.p.z, hx: 2.1, hz: 3.0, yaw: h, y0: ex.p.y, y1: ex.p.y + 4 }];

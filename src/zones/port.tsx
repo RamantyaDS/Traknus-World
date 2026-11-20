@@ -22,6 +22,7 @@ const zone: ZoneModule = {
   Content: ({ drive }) => <ZoneContent drive={drive} />,
   Hud: () => <Hud />,
   stations: [{ id: 'forklift', label: 'Naik forklift Toyota 4FD240', pos: () => [fk.x, fk.z], r: 4.2, exit: () => side(2.6) }],
+  solids: EMBED.solids,
   blockers: () => [...OBSTACLES.filter((o) => o.y1 > 0.45 && o.y0 < 1.8), ...DYNAMIC, ...footprint(fk)],
   enter() {
     void ensureAudio();

@@ -13,7 +13,7 @@ import { RainDrops, daylight } from './Sky';
 import { groundH } from './physics';
 import { look, origin, player, save, toast, truck, useWorld } from './state';
 import { Land, hole } from './Land';
-import { TruckModel, stepTruck } from './Truck';
+import { TruckModel, stepTruck, truckSolids } from './Truck';
 import { WorldSky } from './Sky';
 import { truckSound } from './sound';
 
@@ -156,6 +156,7 @@ function Controller() {
     const frozen = s.map || s.menu || !s.started;
     if (s.mode === 'walk' && !frozen) stepPlayer(dt, frame);
     stepTruck(dt, frame, s.mode === 'truck' && !frozen);
+    truckSolids(s.zone ? loaded[s.zone] : null, s.zone);
     if (s.mode === 'truck') {
       player.x = truck.x;
       player.z = truck.z;
