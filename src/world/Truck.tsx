@@ -2,16 +2,16 @@
 // follows the ground and stops against walls. W/S gas and brake (S reverses once stopped), A/D steer, Space handbrake,
 // H horn. During the genset mission the genset rides on the deck.
 import { useFrame } from '@react-three/fiber';
-import { useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { axis, held } from './input';
 import { collide, groundH } from './physics';
 import { daylight } from './Sky';
 import type { ZoneModule } from '../zones/types';
 import { ZONES, distToZone, type ZoneId } from './map';
-import { truck, useWorld } from './state';
+import { toast, truck, useWorld } from './state';
 import { SEA_Y } from './terrain';
-import { KitMesh, TRAKNUS, TruckWheel, buildCab, buildChassis, buildFlatbed } from '@forklift/scene/truckKit';
+import { KitMesh, TM, TRAKNUS, TruckWheel, buildCab, buildChassis, buildFlatbed } from '@forklift/scene/truckKit';
 
 const WB = 4.6; // wheelbase, m
 const VMAX = 22; // 80 km/h
@@ -21,11 +21,17 @@ const AXLE_F = 3.3;
 const REAR = [-4.9, -6.3];
 
 /** The truck's solid boxes (truck frame: x across, z forward from the centre): cab, deck, headboard, deck load. */
+const DECK_TOP = 1.38;
 const BOXES = [
   { x: 0, z: 3.45, hx: 1.25, hz: 1.15, y0: 0.15, y1: 3.2 },
-  { x: 0, z: -1.6, hx: 1.25, hz: 3.3, y0: 0.15, y1: 1.4 },
+  { x: 0, z: -1.6, hx: 1.25, hz: 3.3, y0: 0.15, y1: DECK_TOP },
   { x: 0, z: 1.6, hx: 1.25, hz: 0.12, y0: 1.3, y1: 2.95 },
 ];
+/** The deck as a surface to set a load on (top at DECK_TOP, the headboard ahead of it). */
+const DECK = { x: 0, z: -1.65, hx: 1.2, hz: 3.15, y0: DECK_TOP - 0.2, y1: DECK_TOP };
+/** Two timber bearers across the deck: the load sits on them, so the forks can be drawn out underneath. */
+const TIMBER_Z = [0.65, -3.95];
+const TIMBERS = TIMBER_Z.map((z) => ({ x: 0, z, hx: 1.2, hz: 0.1, y0: DECK_TOP, y1: DECK_TOP + 0.2 }));
 const LOAD = { x: 0, z: -1.6, hx: 1.05, hz: 3.1, y0: 1.38, y1: 3.8 };
 
 /**
@@ -36,10 +42,29 @@ export function truckSolids(m: ZoneModule | null | undefined, id: ZoneId | null)
   const list = m?.solids;
   if (!list || !id) return;
   list.length = 0;
+  if (m.supports) m.supports.length = 0;
   const d = ZONES[id];
   if (distToZone(d, truck.x, truck.z) > 15) return;
   const s = Math.sin(truck.yaw);
   const c = Math.cos(truck.yaw);
+  const local = (b: typeof LOAD) => ({
+    id: 'truk',
+    x: truck.x - d.x + b.x * c + b.z * s,
+    z: truck.z - d.z - b.x * s + b.z * c,
+    hx: b.hx,
+    hz: b.hz,
+    yaw: truck.yaw,
+    y0: truck.y + b.y0,
+    y1: truck.y + b.y1,
+  });
+  // an empty deck takes a load; one set down there leaves the zone and rides on the truck
+  if (!truck.cargo && m.supports) {
+    m.supports.push(local(DECK), ...TIMBERS.map(local));
+    if (m.loadTruck?.()) {
+      truck.cargo = true;
+      toast('Genset sudah di bak truk Traknus. Ikat muatan — truk siap jalan.', 6000);
+    }
+  }
   for (const b of truck.cargo ? [...BOXES, LOAD] : BOXES)
     list.push({
       id: 'truk',
@@ -102,41 +127,15 @@ export function stepTruck(dt: number, frame: number, driving: boolean) {
   t.wheel += (t.v / 0.52) * dt;
 }
 
-/** The genset on the deck (outline of the open 2250 kVA set on its skid). */
-function DeckGenset() {
-  return (
-    <group position={[0, 1.42, -1.6]}>
-      <mesh position={[0, 0.08, 0]} castShadow>
-        <boxGeometry args={[2.1, 0.16, 6.2]} />
-        <meshStandardMaterial color="#2d2f31" roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 1.15, 1.0]} castShadow>
-        <boxGeometry args={[1.7, 1.9, 3.4]} />
-        <meshStandardMaterial color="#e9b00c" roughness={0.5} metalness={0.2} />
-      </mesh>
-      <mesh position={[0, 1.2, -1.75]} castShadow>
-        <boxGeometry args={[1.9, 2.0, 2.1]} />
-        <meshStandardMaterial color="#2f4f7a" roughness={0.45} metalness={0.3} />
-      </mesh>
-      <mesh position={[0, 1.3, 2.95]} castShadow>
-        <boxGeometry args={[2.0, 2.3, 0.4]} />
-        <meshStandardMaterial color="#3a3d40" roughness={0.6} />
-      </mesh>
-      {[-2.6, 0, 2.6].map((z) => (
-        <mesh key={z} position={[0, 1.3, z]}>
-          <boxGeometry args={[2.16, 0.05, 0.08]} />
-          <meshStandardMaterial color="#e05a1a" />
-        </mesh>
-      ))}
-    </group>
-  );
-}
+/** The genset on the deck (the forklift simulator's model), fetched when first needed. */
+const DeckGenset = lazy(() => import('./DeckGenset'));
 
 export function TruckModel() {
   const root = useRef<THREE.Group>(null);
   const wheels = useRef<THREE.Object3D[]>([]);
   const front = useRef<THREE.Object3D[]>([]);
   const cargo = useRef<THREE.Group>(null);
+  const [hasCargo, setHasCargo] = useState(false);
   const head = useRef<THREE.SpotLight>(null);
   const aim = useRef<THREE.Object3D>(null);
   // the beam points at a spot ahead of the truck that moves with it
@@ -172,6 +171,7 @@ export function TruckModel() {
       w.rotation.y = front.current.includes(w) ? truck.steer : 0;
     }
     cargo.current!.visible = truck.cargo;
+    if (truck.cargo && !hasCargo) setHasCargo(true);
   });
   const reg = (o: THREE.Object3D | null, isFront: boolean) => {
     if (!o) return;
@@ -187,6 +187,7 @@ export function TruckModel() {
             buildCab(k, TRAKNUS, { head: lamps.head });
             buildChassis(k, { end: -8.15, rear: REAR, fuelZ: -2.3, batteryZ: -2.1, sideGuard: true });
             buildFlatbed(k, { z0: -1.6, z1: -8.2, firstAxle: REAR[0], lastAxle: REAR[1], lv: TRAKNUS, tail: lamps.tail });
+            for (const z of TIMBER_Z) k.box(TM.wood2, [2.3, 0.2, 0.2], [0, DECK_TOP + 0.1, z - AXLE_F]);
           }}
         />
         {([1, -1] as const).map((s) => (
@@ -203,7 +204,11 @@ export function TruckModel() {
         )}
       </group>
       <group ref={cargo}>
-        <DeckGenset />
+        {hasCargo && (
+          <Suspense fallback={null}>
+            <DeckGenset y={DECK_TOP + 0.2} z={-1.65} />
+          </Suspense>
+        )}
       </group>
       <spotLight ref={head} position={[0, 1.0, 4.6]} angle={0.55} penumbra={0.5} distance={70} decay={1.4} color="#fff3d6" />
       <object3D ref={aim} position={[0, 0, 30]} />

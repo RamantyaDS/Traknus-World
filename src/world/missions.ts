@@ -26,15 +26,17 @@ export const MISSIONS: Mission[] = [
   {
     id: 'genset',
     title: 'Genset dari pelabuhan sampai menyala',
-    intro: 'Genset 2250 kVA tiba di pelabuhan. Turunkan dengan forklift, kirim dengan truk ke proyek pabrik, pasang dengan crane, lalu jalankan genset cadangan gedung.',
+    intro: 'Genset 2250 kVA tiba di pelabuhan. Turunkan dengan forklift, muat ke truk Traknus, kirim ke proyek pabrik, pasang dengan crane, lalu jalankan genset cadangan gedung.',
     steps: [
       { zone: 'port', prepare: 'genset', text: 'Pelabuhan: naik forklift dan turunkan genset dari truk ke area letak.', done: (s) => s.job === 'genset' && s.phase === 'done' },
       {
+        zone: 'port',
+        text: 'Ambil truk Traknus (M → Panggil truk), masuk lewat gerbang utara pelabuhan dan parkir dekat genset. Lalu naik forklift dan letakkan genset di bak truk.',
+        done: () => truck.cargo,
+      },
+      {
         zone: 'crane',
-        text: 'Crew sudah memuat genset ke truk Traknus di luar gerbang pelabuhan. Bawa truknya ke Proyek pabrik.',
-        start: () => {
-          truck.cargo = true;
-        },
+        text: 'Genset sudah di bak. Bawa truk Traknus ke Proyek pabrik.',
         done: () => useWorld.getState().mode === 'truck' && inRect(ZONES.crane, truck.x, truck.z, -2) && Math.abs(truck.v) < 0.5,
       },
       {

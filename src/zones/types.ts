@@ -44,6 +44,10 @@ export interface ZoneModule {
   setRain?(on: boolean): void;
   /** The simulator's list of world solids (its EMBED.solids): the world puts the truck there, in zone coordinates. */
   solids?: (Blocker & { id: string })[];
+  /** Surfaces a load may be set down on (its EMBED.supports): the world puts the truck's deck there. */
+  supports?: (Blocker & { id: string })[];
+  /** A load the player set down on the truck's deck is taken off the zone: true once, when that happens. */
+  loadTruck?(): boolean;
   /** Progress the world's missions read: named flags/values. */
   status?(): Record<string, number | boolean | string>;
   /** Mission hooks: prepare the zone for a mission step. */

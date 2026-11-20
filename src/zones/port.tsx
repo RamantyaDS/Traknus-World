@@ -2,7 +2,8 @@
 import { EMBED } from '@forklift/embed';
 import { bindKeys } from '@forklift/input';
 import { ZoneContent } from '@forklift/scene/Experience';
-import { footprint, togglePark } from '@forklift/sim/forklift';
+import { footprint, forksClear, togglePark } from '@forklift/sim/forklift';
+import { inside } from '@forklift/sim/geom';
 import { DYNAMIC, OBSTACLES } from '@forklift/sim/world';
 import { ensureAudio, updateSound } from '@forklift/sound';
 import { chooseJob, fk, setRain, useUI } from '@forklift/store';
@@ -23,6 +24,17 @@ const zone: ZoneModule = {
   Hud: () => <Hud />,
   stations: [{ id: 'forklift', label: 'Naik forklift Toyota 4FD240', pos: () => [fk.x, fk.z], r: 4.2, exit: () => side(2.6) }],
   solids: EMBED.solids,
+  supports: EMBED.supports,
+  loadTruck() {
+    const c = fk.cargo;
+    const deck = EMBED.supports[0];
+    // resting on the deck or on its timbers, the forks drawn out
+    if (!deck || c.state !== 'rest' || c.y < deck.y1 - 0.05 || c.y > deck.y1 + 0.3 || !inside(deck, c.x, c.z) || !forksClear(fk)) return false;
+    // the set rides away on the truck: take it out of the yard
+    c.x = 1e4;
+    c.z = 1e4;
+    return true;
+  },
   blockers: () => [...OBSTACLES.filter((o) => o.y1 > 0.45 && o.y0 < 1.8), ...DYNAMIC, ...footprint(fk)],
   enter() {
     void ensureAudio();
