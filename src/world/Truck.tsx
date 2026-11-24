@@ -8,13 +8,32 @@ import { axis, held } from './input';
 import { TRUCK_BOXES, collide, groundH } from './physics';
 import { daylight } from './Sky';
 import type { ZoneModule } from '../zones/types';
-import { ZONES, distToZone, type ZoneId } from './map';
+import { ROAD_HALF, ZONES, ZONE_LIST, distToZone, inRect, type ZoneId } from './map';
+import { newDrive, requestShift, selectDirection, stepDrive } from './drivetrain';
 import { toast, truck, useWorld } from './state';
-import { SEA_Y } from './terrain';
+import { SEA_Y, roadDist } from './terrain';
 import { KitMesh, TM, TRAKNUS, TruckWheel, buildCab, buildChassis, buildFlatbed } from '@forklift/scene/truckKit';
 
 const WB = 4.6; // wheelbase, m
-const VMAX = 22; // 80 km/h
+
+/** The driveline (engine, 12-speed AMT, brakes): see drivetrain.ts. */
+const drive = newDrive();
+let holdDir = 0;
+
+/** Tyre grip: asphalt road, a zone's paved or packed ground, or loose ground. */
+function gripAt(x: number, z: number) {
+  if (roadDist(x, z) < ROAD_HALF) return 0.8;
+  return ZONE_LIST.some((d) => inRect(d, x, z)) ? 0.72 : 0.5;
+}
+
+/** Manual shift request (R up, F down) and the automatic / manual switch (T). */
+export function truckShift(dir: 1 | -1) {
+  if (drive.auto) drive.auto = false;
+  requestShift(drive, dir);
+}
+export function truckAuto() {
+  drive.auto = !drive.auto;
+}
 const HALF = { x: 1.25, z: 4.6 };
 /** Front axle and the tandem axles (truck frame, z forward from the centre). */
 const AXLE_F = 3.3;
@@ -82,21 +101,33 @@ export function truckSolids(m: ZoneModule | null | undefined, id: ZoneId | null)
 
 export function stepTruck(dt: number, frame: number, driving: boolean) {
   const t = truck;
-  const gas = driving ? Math.max(0, axis(['s', 'arrowdown'], ['w', 'arrowup'])) : 0;
-  const back = driving ? Math.max(0, axis(['w', 'arrowup'], ['s', 'arrowdown'])) : 0;
+  const w = driving ? Math.max(0, axis(['s', 'arrowdown'], ['w', 'arrowup'])) : 0;
+  const s = driving ? Math.max(0, axis(['w', 'arrowup'], ['s', 'arrowdown'])) : 0;
   const steerIn = driving ? axis(['d', 'arrowright'], ['a', 'arrowleft']) : 0;
   const hand = !driving || held.has(' ');
   t.horn = driving && held.has('h');
-  // S brakes while rolling forward, reverses once (nearly) stopped
-  let acc = 0;
-  if (gas) acc = t.v < -0.3 ? 7 : 2.4 * (1 - Math.max(0, t.v) / VMAX);
-  else if (back) acc = t.v > 0.3 ? -7 : -1.6 * (1 + t.v / 6);
-  if (hand) acc = -Math.sign(t.v) * Math.min(Math.abs(t.v) / dt, 8);
-  acc -= t.v * 0.04 + Math.sign(t.v) * 0.15; // drag and rolling resistance
-  const nv = t.v + acc * dt;
-  t.v = !gas && !back && Math.sign(nv) !== Math.sign(t.v) ? 0 : nv;
-  t.gas = gas;
-  t.brake = back && t.v > 0 ? 1 : hand ? 1 : 0;
+  // W is the accelerator and S the brake in a forward gear (the other way round in reverse); holding the brake at
+  // a standstill selects reverse, holding the accelerator there selects drive again
+  const rev = drive.gear < 0;
+  const throttle = rev ? s : w;
+  const brakeIn = rev ? w : s;
+  if (Math.abs(drive.v) < 0.3 && brakeIn > 0.5) {
+    holdDir += dt;
+    if (holdDir > 0.35) {
+      selectDirection(drive, !rev, t.cargo, t.pitch);
+      holdDir = 0;
+    }
+  } else holdDir = 0;
+  drive.v = t.v;
+  stepDrive(drive, { throttle, brake: brakeIn, hand, loaded: t.cargo, pitch: t.pitch, grip: gripAt(t.x, t.z) }, dt);
+  t.v = drive.v;
+  t.gear = drive.gear;
+  t.rpm = driving ? drive.rpm : 0;
+  t.auto = drive.auto;
+  t.shifts = drive.shifts;
+  t.running = driving;
+  t.gas = throttle;
+  t.brake = brakeIn > 0.05 || hand ? 1 : 0;
   // steering: slower and smaller at speed
   const maxSteer = 0.6 / (1 + Math.abs(t.v) / 9);
   t.steer += (steerIn * maxSteer - t.steer) * Math.min(1, dt * 3);

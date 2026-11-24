@@ -9,7 +9,7 @@ export type Mode = 'walk' | 'drive' | 'truck';
 export const player = { x: SPAWN.x, y: 0, z: SPAWN.z, yaw: SPAWN.yaw, vy: 0, speed: 0, phase: 0, grounded: true };
 
 /** The delivery truck (world coordinates). `cargo`: the genset rides on the deck during the mission. */
-export const truck = { x: TRUCK_SPAWN.x, y: 0, z: TRUCK_SPAWN.z, yaw: TRUCK_SPAWN.yaw, v: 0, steer: 0, pitch: 0, roll: 0, gas: 0, brake: 0, horn: false, cargo: false, wheel: 0 };
+export const truck = { x: TRUCK_SPAWN.x, y: 0, z: TRUCK_SPAWN.z, yaw: TRUCK_SPAWN.yaw, v: 0, steer: 0, pitch: 0, roll: 0, gas: 0, brake: 0, horn: false, cargo: false, wheel: 0, gear: 2, rpm: 0, auto: true, shifts: 0, running: false };
 
 /**
  * The world offset of the render frame. The mounted zone always sits at the render origin, so each simulator's own
@@ -31,6 +31,8 @@ interface WS {
   mode: Mode;
   /** Zone whose scene is mounted (the player is in or near it). */
   zone: ZoneId | null;
+  /** Zone being set up out of sight (its shaders compiling) before it replaces the stand-in. */
+  staging: ZoneId | null;
   loading: boolean;
   /** What the player drives or operates: `${zone}:${station}`. */
   station: string | null;
@@ -52,6 +54,7 @@ export const useWorld = create<WS>((set) => ({
   started: false,
   mode: 'walk',
   zone: null,
+  staging: null,
   loading: false,
   station: null,
   prompt: '',
@@ -117,3 +120,5 @@ export function clearSave() {
 
 // development and headless checks
 if (import.meta.env.DEV) Object.assign(globalThis, { player, truck, origin, look, useWorld });
+// headless performance checks of the built site open it with ?probe
+if (typeof location !== 'undefined' && location.search.includes('probe')) Object.assign(globalThis, { __h: { player, truck, origin, look, useWorld } });

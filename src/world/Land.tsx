@@ -3,8 +3,17 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo } from 'react';
 import * as THREE from 'three';
-import { ROADS, ROAD_HALF } from './map';
+import { SITE_TREES } from '@crane/scene/siteTrees';
+import { crownGeometry, palmMaterials, palmTrunkH } from '@tractor/scene/palmKit';
+import { EDGE_TREES } from '@excavator/scene/edgeTrees';
+import { shape } from '@excavator/sim/site';
+import { ROADS, ROAD_HALF, ZONES } from './map';
+
+/** The dig site's own ground height (its trees stand on it). */
+const EXC_GROUND = (x: number, z: number) => shape(x, z).h;
 import { MAP, SEA_Y, coastZ, noise, roadDist, terrainH, zoneDist } from './terrain';
+import { MAT_OF, TREE_LAYOUT, TREE_TINT, treeParts } from '@excavator/scene/treeKit';
+import { Grass, groundMaps } from './Grass';
 import { canvasTexture } from './util';
 
 /** Local rect of the mounted zone (render coordinates = the zone's own), where the world terrain is not drawn. */
@@ -21,6 +30,11 @@ function Ground() {
     g.translate((MAP.x0 + MAP.x1) / 2, 0, (MAP.z0 + MAP.z1) / 2);
     const p = g.attributes.position;
     const col = new Float32Array(p.count * 3);
+    // the same grid as maps for the grass: height and how much grass grows (half float), and the ground colour
+    const cols = Math.round(w / STEP) + 1;
+    const rows = Math.round(d / STEP) + 1;
+    const hg = new Uint16Array(cols * rows * 4);
+    const gc = new Uint8Array(cols * rows * 4);
     const c = new THREE.Color();
     const grass = new THREE.Color('#5b7f34');
     const grass2 = new THREE.Color('#7b8f3e');
@@ -46,22 +60,63 @@ function Ground() {
       if (z < cz + 14) c.lerp(sand, Math.min(1, (cz + 14 - z) / 10));
       if (z < cz - 2) c.lerp(wetSand, Math.min(1, (cz - 2 - z) / 6));
       col.set([c.r, c.g, c.b], i * 3);
+      // grass: none on roads, sand, the sea or in a zone; thinner on the dry patches and the laterite edges
+      let grow = 1;
+      if (rd < ROAD_HALF + 2.5) grow = 0;
+      else if (rd < ROAD_HALF + 6) grow = 0.5;
+      if (zd < 1) grow = 0;
+      if (z < cz + 12 || h < SEA_Y + 0.5) grow = 0;
+      if (noise(x / 90 + 4, z / 90) > 0.68) grow *= 0.7;
+      const k = (Math.round((z - MAP.z0) / STEP) * cols + Math.round((x - MAP.x0) / STEP)) * 4;
+      hg[k] = THREE.DataUtils.toHalfFloat(h);
+      hg[k + 1] = THREE.DataUtils.toHalfFloat(grow);
+      hg[k + 3] = THREE.DataUtils.toHalfFloat(1);
+      gc[k] = Math.round(c.r * 255);
+      gc[k + 1] = Math.round(c.g * 255);
+      gc[k + 2] = Math.round(c.b * 255);
+      gc[k + 3] = 255;
     }
+    const ht = new THREE.DataTexture(hg, cols, rows, THREE.RGBAFormat, THREE.HalfFloatType);
+    const ct = new THREE.DataTexture(gc, cols, rows, THREE.RGBAFormat, THREE.UnsignedByteType);
+    for (const t of [ht, ct]) {
+      t.magFilter = t.minFilter = THREE.LinearFilter;
+      t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+      t.needsUpdate = true;
+    }
+    groundMaps.height = ht;
+    groundMaps.color = ct;
+    groundMaps.min.set(MAP.x0 - STEP / 2, MAP.z0 - STEP / 2);
+    groundMaps.size.set(cols * STEP, rows * STEP);
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.computeVertexNormals();
     return g;
   }, []);
   const mat = useMemo(() => {
-    const tex = canvasTexture(256, 256, (g) => {
-      g.fillStyle = '#c8c8c8';
-      g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 9000; i++) {
-        const v = 150 + Math.random() * 105;
-        g.fillStyle = `rgb(${v},${v},${v})`;
-        g.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1 + Math.random() * 3);
+    // short grass and soil: blade strokes in several shades over a mottled base, near-neutral so the ground's own
+    // colour shows through
+    const tex = canvasTexture(512, 512, (g) => {
+      g.fillStyle = '#bdbdb4';
+      g.fillRect(0, 0, 512, 512);
+      for (let i = 0; i < 700; i++) {
+        const v = 150 + Math.random() * 70;
+        g.fillStyle = `rgba(${v},${v - 4},${v - 18},0.35)`;
+        g.beginPath();
+        g.arc(Math.random() * 512, Math.random() * 512, 4 + Math.random() * 14, 0, Math.PI * 2);
+        g.fill();
+      }
+      for (let i = 0; i < 26000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const v = 140 + Math.random() * 115;
+        g.strokeStyle = `rgb(${v - 6},${v},${v - 30})`;
+        g.lineWidth = 0.8 + Math.random() * 1.2;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(x + (Math.random() - 0.5) * 3, y - 2 - Math.random() * 5);
+        g.stroke();
       }
     });
-    tex.repeat.set((MAP.x1 - MAP.x0) / 6, (MAP.z1 - MAP.z0) / 6);
+    tex.repeat.set((MAP.x1 - MAP.x0) / 9, (MAP.z1 - MAP.z0) / 9);
     const m = new THREE.MeshStandardMaterial({ vertexColors: true, map: tex, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 });
     m.onBeforeCompile = (s) => {
       s.uniforms.uHole = hole;
@@ -70,7 +125,9 @@ function Ground() {
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWxz = (modelMatrix * vec4(transformed, 1.0)).xz;');
       s.fragmentShader = s.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying vec2 vWxz;\nuniform vec4 uHole;')
-        .replace('void main() {', 'void main() {\nif (vWxz.x > uHole.x && vWxz.x < uHole.z && vWxz.y > uHole.y && vWxz.y < uHole.w) discard;');
+        .replace('void main() {', 'void main() {\nif (vWxz.x > uHole.x && vWxz.x < uHole.z && vWxz.y > uHole.y && vWxz.y < uHole.w) discard;')
+        // large-scale variation so the tiling never shows: the detail texture again at 1/23 the size, as a tint
+        .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= 0.78 + 0.44 * texture2D(map, vWxz / 207.0).g;');
     };
     return m;
   }, []);
@@ -176,39 +233,8 @@ function rand(seed: number) {
   };
 }
 
-/** An oil palm crown: drooping fronds as tapered strips, one geometry. */
-export function palmCrown() {
-  const pos: number[] = [];
-  const idx: number[] = [];
-  const N = 14;
-  for (let f = 0; f < N; f++) {
-    const a = (f / N) * Math.PI * 2 + (f % 2) * 0.2;
-    const up = f % 2 ? 0.55 : 0.2;
-    const ca = Math.cos(a);
-    const sa = Math.sin(a);
-    const segs = 4;
-    const base = pos.length / 3;
-    for (let s = 0; s <= segs; s++) {
-      const t = s / segs;
-      const r = 4.2 * t;
-      const y = up * 3 * t - 2.6 * t * t;
-      const w = 0.55 * Math.sin(Math.PI * Math.min(1, t * 1.15)) + 0.05;
-      pos.push(ca * r - sa * w, y, sa * r + ca * w, ca * r + sa * w, y, sa * r - ca * w);
-      if (s > 0) {
-        const b = base + s * 2;
-        idx.push(b - 2, b - 1, b, b - 1, b + 1, b);
-      }
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
 export const palmTrunkGeo = () => {
-  const g = new THREE.CylinderGeometry(0.28, 0.42, 1, 7, 1, true);
+  const g = new THREE.CylinderGeometry(0.32, 0.42, 1, 7, 1, true);
   g.translate(0, 0.5, 0);
   return g;
 };
@@ -284,6 +310,18 @@ function plant() {
       const chunk = (px > 125 ? 1 : 0) + (pz > 550 ? 2 : 0);
       trees[chunk].push({ x: px, z: pz, s: 0.7 + rnd() * 0.8, r: rnd() * Math.PI * 2, h });
     }
+  // the trees of the crane site and the dig site, which those simulators leave to the world when embedded
+  for (const [zone, list] of [
+    ['crane', SITE_TREES.map(([x, h, z]) => ({ x, z, s: h / 4.6 }))],
+    ['excavator', EDGE_TREES.map(([x, z, s]) => ({ x, z, s: s * 1.15 }))],
+  ] as const) {
+    const d = ZONES[zone];
+    for (const t of list) {
+      const px = d.x + t.x;
+      const pz = d.z + t.z;
+      trees[(px > 125 ? 1 : 0) + (pz > 550 ? 2 : 0)].push({ x: px, z: pz, s: t.s, r: rnd() * Math.PI * 2, h: zone === 'excavator' ? EXC_GROUND(t.x, t.z) : 0 });
+    }
+  }
   return { palms, trees };
 }
 
@@ -291,36 +329,30 @@ function Trees() {
   const { palms, trees } = plants();
   const mats = useMemo(
     () => ({
-      trunk: new THREE.MeshStandardMaterial({ color: '#6b5a44', roughness: 1 }),
-      frond: new THREE.MeshStandardMaterial({ color: '#3f6e26', roughness: 0.85, side: THREE.DoubleSide }),
-      bark: new THREE.MeshStandardMaterial({ color: '#5c4a38', roughness: 1 }),
-      leaf: new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9, flatShading: true }),
+      // the estate's own bark and fronds (the tractor simulator's), so the plantation reads the same near and far
+      trunk: palmMaterials().trunkMat,
+      frond: palmMaterials().crownMat,
+      ...treeParts().mat,
     }),
     [],
   );
   const geos = useMemo(() => {
-    const trunk = new THREE.CylinderGeometry(0.22, 0.38, 1, 6, 1, true);
-    trunk.translate(0, 0.5, 0);
-    const canopy = new THREE.IcosahedronGeometry(1, 1);
-    return { palmTrunk: palmTrunkGeo(), crown: palmCrown(), trunk, canopy };
+    // the leafy trees come from the shared tree kit (the same as in the simulators)
+    return { palmTrunk: palmTrunkGeo(), crown: crownGeometry(14, 5), ...treeParts().geo };
   }, []);
   const meshes: THREE.Object3D[] = [];
   // fixed number of chunks, so the hooks below run in the same order every render
   palms.forEach((list) => {
     meshes.push(
-      useInstances(list, geos.palmTrunk, mats.trunk, (m, it) => m.compose(v.set(it.x, it.h - 0.1, it.z), q.identity(), sc.set(it.s, 6.5 * it.s, it.s))),
-      useInstances(list, geos.crown, mats.frond, (m, it) => m.compose(v.set(it.x, it.h + 6.4 * it.s, it.z), q.setFromEuler(e.set(0, it.r, 0)), sc.set(it.s, it.s, it.s))),
+      useInstances(list, geos.palmTrunk, mats.trunk, (m, it) => m.compose(v.set(it.x, it.h - 0.1, it.z), q.setFromEuler(e.set(0, it.r, 0)), sc.set(it.s, palmTrunkH(it.s), it.s))),
+      useInstances(list, geos.crown, mats.frond, (m, it) => m.compose(v.set(it.x, it.h + palmTrunkH(it.s) - 0.2, it.z), q.setFromEuler(e.set(0, it.r, 0)), sc.set(it.s, it.s, it.s))),
     );
   });
   trees.forEach((list) => {
     meshes.push(
-      useInstances(list, geos.trunk, mats.bark, (m, it) => m.compose(v.set(it.x, it.h - 0.1, it.z), q.identity(), sc.set(it.s, 4.5 * it.s, it.s))),
-      useInstances(
-        list,
-        geos.canopy,
-        mats.leaf,
-        (m, it) => m.compose(v.set(it.x, it.h + 5.6 * it.s, it.z), q.setFromEuler(e.set(0, it.r, 0)), sc.set(3.4 * it.s, 2.6 * it.s, 3.4 * it.s)),
-        (c, it) => c.setHSL(0.27 + 0.05 * Math.sin(it.r * 3), 0.45, 0.22 + 0.06 * Math.cos(it.r * 5)),
+      ...(['trunk', 'canopy', 'core', 'shade'] as const).map((part) =>
+        // eslint-disable-next-line react-hooks/rules-of-hooks
+        useInstances(list, geos[part], mats[MAT_OF[part]], (m, it) => TREE_LAYOUT[part](m, it), TREE_TINT[part]),
       ),
     );
   });
@@ -340,6 +372,7 @@ export function Land() {
       <Sea />
       <Roads />
       <Trees />
+      <Grass />
     </>
   );
 }

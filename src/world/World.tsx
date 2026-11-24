@@ -1,7 +1,7 @@
 // The world inside the canvas: sky, land, the operator and the truck in the shifted world group, the mounted zone at
 // the render origin, the follow camera, and the controller that walks, drives, loads zones and runs the clock.
 import { useFrame, useThree } from '@react-three/fiber';
-import { Suspense, useEffect, useRef } from 'react';
+import { Suspense, startTransition, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { loadZone, loaded } from '../zones';
 import { Impostors } from './Impostors';
@@ -13,15 +13,23 @@ import { RainDrops, daylight } from './Sky';
 import { groundH } from './physics';
 import { look, origin, player, save, toast, truck, useWorld } from './state';
 import { Land, hole } from './Land';
-import { TruckModel, stepTruck, truckSolids } from './Truck';
+import { TruckModel, stepTruck, truckAuto, truckShift, truckSolids } from './Truck';
 import { WorldSky } from './Sky';
 import { truckSound } from './sound';
 
-const LOAD = 95; // start loading a zone this close to its footprint
-const UNLOAD = 170; // drop it again this far away
+const PREFETCH = 260; // fetch a zone's code this close to its footprint
+const LOAD = 140; // set it up (out of sight, shaders compiling) this close
+const UNLOAD = 200; // drop it again this far away
+/** Where a zone waits while it is set up: far below, so it is never drawn. */
+const STAGE_Y = -20000;
 
 let frame = 0;
 let switching = false;
+const prefetched = new Set<ZoneId>();
+const frames = (n: number) => new Promise<void>((res) => {
+  const f = () => (--n <= 0 ? res() : requestAnimationFrame(f));
+  requestAnimationFrame(f);
+});
 let lastSave = 0;
 let wasNight: boolean | null = null;
 
@@ -41,12 +49,7 @@ function mount(id: ZoneId, camera: THREE.Camera) {
   origin.z = d.z;
   const [x0, z0, x1, z1] = d.rect;
   hole.value.set(x0 + 0.4, z0 + 0.4, x1 - 0.4, z1 - 0.4);
-  const s = useWorld.getState();
-  const m = loaded[id]!;
-  wasNight = daylight(s.time) < 0.3;
-  m.setNight?.(wasNight);
-  m.setRain?.(s.rain);
-  s.set({ zone: id });
+  useWorld.getState().set({ zone: id });
 }
 
 function unmount() {
@@ -127,6 +130,8 @@ function nearest(): { label: string; act: () => void } | null {
 
 function Controller() {
   const camera = useThree((s) => s.camera);
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
   const shift = useRef<THREE.Group | null>(null);
   useEffect(() => {
     onKey('e', () => {
@@ -135,6 +140,11 @@ function Controller() {
       if (s.mode === 'truck') leaveTruck();
       else if (s.mode === 'walk') nearest()?.act();
     });
+    // the truck's gearbox: R up, F down (manual), T automatic / manual
+    const inTruck = () => useWorld.getState().mode === 'truck' && !useWorld.getState().map && !useWorld.getState().menu;
+    onKey('r', () => inTruck() && truckShift(1));
+    onKey('f', () => inTruck() && truckShift(-1));
+    onKey('t', () => inTruck() && truckAuto());
     onKey('escape', () => {
       const s = useWorld.getState();
       if (s.map || s.menu || s.missions) s.set({ map: false, menu: false, missions: false });
@@ -191,29 +201,76 @@ function Controller() {
           best = d.id;
         }
       }
+      // fetch the code of zones ahead early, so it is parsed long before it is needed
+      for (const d of ZONE_LIST) if (!loaded[d.id] && !prefetched.has(d.id) && distToZone(d, player.x, player.z) < PREFETCH) {
+        prefetched.add(d.id);
+        void loadZone(d.id).catch(() => prefetched.delete(d.id));
+      }
       if (cur && curD > UNLOAD && (!best || best === cur)) unmount();
       else if (best && best !== cur && (curD > LOAD || bestD < curD - 40)) {
         const id = best;
         switching = true;
-        s.set({ loading: true });
+        // the stand-in stays in view while the zone is built out of sight and its shaders compile in parallel;
+        // only then does it take the stand-in's place, so the switch costs no long frame
         loadZone(id)
-          .then((m) => {
+          .then(async (m) => {
             if (!m) return;
             unmount();
+            // the zone's night lighting and rain first, so its shaders compile for the lights it will show
+            const w = useWorld.getState();
+            wasNight = daylight(w.time) < 0.3;
+            m.setNight?.(wasNight);
+            m.setRain?.(w.rain);
+            w.set({ staging: id });
+            // built (in slices) and its merged geometry under way
+            // wait until it stops growing (parts behind their own Suspense, textures still loading, bakes)
+            const count = () => {
+              let n = 0;
+              scene.getObjectByName('zone-stage')?.traverse((o) => {
+                const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+                if (m) n += 1 + (m.map ? 1 : 0);
+              });
+              return n;
+            };
+            for (let i = 0, last = -1, still = 0; i < 400 && still < 12; i++) {
+              await frames(1);
+              const n = count();
+              still = n > 0 && n === last ? still + 1 : 0;
+              last = n;
+            }
+            // hidden while staged (some parts are never frustum-culled and would be drawn, compiling on the spot);
+            // shown only for the moment compileAsync collects its materials
+            // everything in it, also what is hidden for now (night lamps, rain, parts shown up close), so nothing
+            // compiles later on the spot (lights keep theirs: the light count is part of every shader); put back after
+            const g = scene.getObjectByName('zone-stage');
+            const hidden: THREE.Object3D[] = [];
+            g?.traverse((o) => {
+              if (!o.visible && !(o as THREE.Light).isLight) {
+                hidden.push(o);
+                o.visible = true;
+              }
+            });
+            gl.compile(scene, camera); // creates the programs; the driver links them in parallel
+            for (const o of hidden) o.visible = false;
+            for (let i = 0; i < 300 && !(gl.info.programs ?? []).every((p) => (p as unknown as { isReady(): boolean }).isReady()); i++) await frames(1);
+            await frames(2);
             mount(id, camera);
+            useWorld.getState().set({ staging: null });
           })
           .catch((err) => {
             console.error(err);
+            useWorld.getState().set({ staging: null });
             toast(`Gagal memuat ${ZONES[id].name}.`);
           })
           .finally(() => {
             switching = false;
-            // let the new zone compile its shaders before hiding the notice
-            setTimeout(() => useWorld.getState().set({ loading: false }), 900);
           });
       }
     }
     if (shift.current) shift.current.position.set(-origin.x, 0, -origin.z);
+    // only someone already at a zone that is still being set up has to wait for it
+    const waiting = !!s.staging && distToZone(ZONES[s.staging], player.x, player.z) < 25;
+    if (waiting !== s.loading) s.set({ loading: waiting });
 
     // what can be used here
     if (s.mode === 'walk') {
@@ -299,17 +356,31 @@ function FollowCam() {
 
 /** The mounted zone, at the render origin. */
 function ZoneScene() {
-  const zone = useWorld((s) => s.zone);
+  const mounted = useWorld((s) => s.zone);
   const mode = useWorld((s) => s.mode);
   const station = useWorld((s) => s.station);
+  // which zone's scene exists follows the store in a transition: React builds a new zone in small slices between
+  // frames instead of one long frame
+  const [zone, setZone] = useState<ZoneId | null>(() => useWorld.getState().zone ?? useWorld.getState().staging);
+  useEffect(
+    () =>
+      useWorld.subscribe((s) => {
+        const want = s.zone ?? s.staging;
+        startTransition(() => setZone(want));
+      }),
+    [],
+  );
   if (!zone) return null;
   const m = loaded[zone];
   if (!m) return null;
   const st = station && station.startsWith(`${zone}:`) ? station.slice(zone.length + 1) : null;
+  // same element while staged and once mounted (only the group moves), so the zone is built once
   return (
-    <Suspense fallback={null}>
-      <m.Content key={zone} drive={mode === 'drive' && !!st} station={st} />
-    </Suspense>
+    <group name={mounted === zone ? 'zone' : 'zone-stage'} position-y={mounted === zone ? 0 : STAGE_Y} visible={mounted === zone}>
+      <Suspense fallback={null}>
+        <m.Content key={zone} drive={mode === 'drive' && !!st} station={st} />
+      </Suspense>
+    </group>
   );
 }
 
@@ -325,7 +396,7 @@ function DevInfo() {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   useEffect(() => {
-    if (import.meta.env.DEV) Object.assign(globalThis, { gl, scene });
+    if (import.meta.env.DEV || location.search.includes('probe')) Object.assign(globalThis, { gl, scene });
   }, [gl, scene]);
   return null;
 }

@@ -30,6 +30,14 @@ kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 5
 .getoff { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 70; background: rgba(13, 17, 22, 0.86); border-color: #e05a1a; display: flex; gap: 8px; align-items: center; }
 .speedo { position: fixed; right: 16px; bottom: 16px; z-index: 20; background: rgba(13, 17, 22, 0.82); border: 1px solid #2c3a46; border-radius: 10px; padding: 10px 14px; display: grid; gap: 2px; text-align: right; max-width: 300px; }
 .speedo b { font-size: 30px; line-height: 1; }
+.speedo-row { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
+.speedo .gear { font-size: 30px; font-weight: 700; line-height: 1; min-width: 46px; text-align: center; border: 1px solid #3b4b59; border-radius: 6px; padding: 2px 6px; color: #ffd27a; font-variant-numeric: tabular-nums; }
+.speedo .gear small { font-size: 12px; color: #9fb3c3; margin-right: 3px; font-weight: 600; }
+.speedo .tacho { position: relative; height: 16px; background: #1b242c; border-radius: 4px; overflow: hidden; margin: 4px 0 2px; }
+.speedo .tacho i { position: absolute; left: 0; top: 0; bottom: 0; background: #6aa5d8; transition: width 0.08s linear; }
+.speedo .tacho i.eco { background: #58b36a; }
+.speedo .tacho i.hi { background: #e0623a; }
+.speedo .tacho span { position: relative; font-size: 11px; line-height: 16px; padding-right: 6px; display: block; text-align: right; font-variant-numeric: tabular-nums; }
 .loading { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 40; background: rgba(13, 17, 22, 0.9); border-radius: 10px; padding: 14px 22px; font-size: 16px; }
 .wtoast { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 45; max-width: min(640px, 92vw); background: rgba(13, 17, 22, 0.92); border-left: 4px solid #ffd23a; border-radius: 8px; padding: 10px 14px; line-height: 1.45; }
 

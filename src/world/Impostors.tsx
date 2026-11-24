@@ -3,10 +3,11 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { PALMS } from '@tractor/sim/estate';
+import { PALMS, height } from '@tractor/sim/estate';
+import { crownGeometry, palmMaterials, palmTrunkH } from '@tractor/scene/palmKit';
 import { ZONES, ZONE_LIST, type ZoneId } from './map';
 import { useWorld } from './state';
-import { palmCrown, palmTrunkGeo } from './Land';
+import { palmTrunkGeo } from './Land';
 
 type Part = { box?: [number, number, number]; cyl?: [number, number, number]; at: [number, number, number]; c: string; yaw?: number; tilt?: number };
 
@@ -103,15 +104,19 @@ function build(id: ZoneId) {
 function EstatePalms({ visible }: { visible: boolean }) {
   const meshes = useMemo(() => {
     const d = ZONES.tractor;
-    const trunk = new THREE.InstancedMesh(palmTrunkGeo(), new THREE.MeshStandardMaterial({ color: '#6b5a44', roughness: 1 }), PALMS.length);
-    const crown = new THREE.InstancedMesh(palmCrown(), new THREE.MeshStandardMaterial({ color: '#3f6e26', roughness: 0.85, side: THREE.DoubleSide }), PALMS.length);
+    // the estate's own palms (parts from the tractor simulator), a lighter crown: the switch to the zone does not show
+    const { trunkMat, crownMat } = palmMaterials();
+    const trunk = new THREE.InstancedMesh(palmTrunkGeo(), trunkMat, PALMS.length);
+    const crown = new THREE.InstancedMesh(crownGeometry(14, 5), crownMat, PALMS.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const v = new THREE.Vector3();
     const s = new THREE.Vector3();
     PALMS.forEach((p, i) => {
-      trunk.setMatrixAt(i, m.compose(v.set(p.x + d.x, -0.1, p.z + d.z), q.identity(), s.set(p.s, 6.5 * p.s, p.s)));
-      crown.setMatrixAt(i, m.compose(v.set(p.x + d.x, 6.4 * p.s, p.z + d.z), q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.r), s.set(p.s, p.s, p.s)));
+      const h = height(p.x, p.z);
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.r);
+      trunk.setMatrixAt(i, m.compose(v.set(p.x + d.x, h - 0.1, p.z + d.z), q, s.set(p.s, palmTrunkH(p.s), p.s)));
+      crown.setMatrixAt(i, m.compose(v.set(p.x + d.x, h + palmTrunkH(p.s) - 0.2, p.z + d.z), q, s.set(p.s, p.s, p.s)));
     });
     for (const x of [trunk, crown]) {
       x.instanceMatrix.needsUpdate = true;

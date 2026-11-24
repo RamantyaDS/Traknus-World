@@ -1,7 +1,7 @@
 // Sky, sun and weather for the whole world: the sun moves with the clock (06:00 sunrise in the east, 18:00 sunset),
 // night has stars and moonlight and the operator's helmet lamp, rain brings low cloud, closer fog and drops around
 // the camera. The shadow-casting sun follows the camera, so every zone gets shadows nearby.
-import { Environment, Lightformer, Sky as DreiSky, Stars } from '@react-three/drei';
+import { Environment, Lightformer, Stars } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -16,7 +16,7 @@ export function sunDir(time: number, out = new THREE.Vector3()) {
 /** 0 at night, 1 in full day, eased through dawn and dusk. */
 export const daylight = (time: number) => Math.max(0, Math.min(1, (sunDir(time).y + 0.08) / 0.3));
 
-const DAY_FOG = new THREE.Color('#c7d6e0');
+const DAY_FOG = new THREE.Color('#bccfde');
 const DUSK_FOG = new THREE.Color('#d9b08c');
 const NIGHT_FOG = new THREE.Color('#070b12');
 const RAIN_FOG = new THREE.Color('#8c969d');
@@ -84,14 +84,77 @@ function SunAndFog() {
   );
 }
 
+const ZENITH_DAY = new THREE.Color('#2f6fc4');
+const ZENITH_DUSK = new THREE.Color('#34477e');
+const ZENITH_NIGHT = new THREE.Color('#010309');
+const ZENITH_RAIN = new THREE.Color('#5d666e');
+const SUN_GLOW = new THREE.Color('#fff1d0');
+
+/**
+ * The sky as a dome around the camera: deep blue overhead fading to the haze at the horizon (the fog's colour, so
+ * far hills melt into it), a bright sun with its glow, warm at dusk, near black at night, grey under rain.
+ */
+function GradientSky() {
+  const scene = useThree((s) => s.scene);
+  const camera = useThree((s) => s.camera);
+  const { mesh, u } = useMemo(() => {
+    const u = {
+      uZenith: { value: new THREE.Color() },
+      uHorizon: { value: new THREE.Color() },
+      uSun: { value: new THREE.Vector3(0, 1, 0) },
+      uGlow: { value: new THREE.Color() },
+      uSunAmt: { value: 1 },
+    };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: u,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      vertexShader: `varying vec3 vDir;
+void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position.z = gl_Position.w; }`,
+      fragmentShader: `uniform vec3 uZenith; uniform vec3 uHorizon; uniform vec3 uSun; uniform vec3 uGlow; uniform float uSunAmt;
+varying vec3 vDir;
+void main() {
+  vec3 d = normalize(vDir);
+  float h = max(d.y, 0.0);
+  vec3 col = mix(uHorizon, uZenith, pow(h, 0.45));
+  // below the horizon: the haze
+  col = mix(col, uHorizon, smoothstep(0.02, -0.08, d.y));
+  float s = max(dot(d, normalize(uSun)), 0.0);
+  col += uGlow * (pow(s, 6.0) * 0.28 + pow(s, 60.0) * 0.5) * uSunAmt;
+  col = mix(col, uGlow * 3.0, smoothstep(0.9993, 0.9997, s) * uSunAmt);
+  gl_FragColor = vec4(col, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -1;
+    return { mesh, u };
+  }, []);
+  useFrame(() => {
+    const { time, rain } = useWorld.getState();
+    const day = daylight(time);
+    const dusk = Math.max(0, 1 - Math.abs(sunDir(time).y) / 0.25) * day;
+    mesh.position.copy(camera.position);
+    u.uHorizon.value.copy((scene.fog as THREE.Fog).color);
+    u.uZenith.value.copy(ZENITH_NIGHT).lerp(ZENITH_DAY, day).lerp(ZENITH_DUSK, dusk * 0.6);
+    if (rain) u.uZenith.value.lerp(ZENITH_RAIN, 0.85).multiplyScalar(0.3 + 0.7 * day);
+    sunDir(time, u.uSun.value);
+    u.uGlow.value.copy(SUN_GLOW).lerp(DUSK_SUN, dusk);
+    u.uSunAmt.value = rain ? 0 : day;
+  });
+  return <primitive object={mesh} />;
+}
+
 function SkyDome() {
   const time = useWorld((s) => Math.round(s.time * 4) / 4);
   const rain = useWorld((s) => s.rain);
   const day = daylight(time);
-  const sp = useMemo(() => sunDir(time).multiplyScalar(100), [time]);
   return (
     <>
-      {day > 0.02 && !rain && <DreiSky sunPosition={sp} turbidity={4} rayleigh={0.9 + (1 - day) * 1.5} mieCoefficient={0.005} mieDirectionalG={0.8} distance={4000} />}
+      <GradientSky />
       {day < 0.4 && !rain && <Stars radius={900} depth={100} count={3000} factor={10} fade />}
       <Environment resolution={FULL ? 256 : 128} frames={1} environmentIntensity={0.15 + 0.6 * day}>
         <Lightformer form="rect" intensity={1.6} color="#dceaf7" scale={[60, 20, 1]} position={[0, 18, 0]} rotation={[Math.PI / 2, 0, 0]} />

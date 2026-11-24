@@ -347,11 +347,25 @@ function Tracker() {
 
 function Speedo() {
   useWorld((s) => s.tick);
+  const rpm = truck.rpm;
+  const gear = truck.gear < 0 ? 'R' : String(truck.gear);
   return (
     <div className="speedo">
-      <b>{Math.round(Math.abs(truck.v) * 3.6)}</b> km/jam
-      <span className="dim">{truck.v < -0.2 ? 'mundur' : truck.cargo ? 'genset di bak' : ''}</span>
-      <span className="dim small">W gas · S rem/mundur · A D setir · Spasi rem tangan · H klakson · E turun</span>
+      <div className="speedo-row">
+        <div>
+          <b>{Math.round(Math.abs(truck.v) * 3.6)}</b> km/jam
+        </div>
+        <div className="gear" title={truck.auto ? 'Otomatis' : 'Manual'}>
+          <small>{truck.gear < 0 ? '' : truck.auto ? 'D' : 'M'}</small>
+          {gear}
+        </div>
+      </div>
+      <div className="tacho" title="Putaran mesin">
+        <i style={{ width: `${Math.min(100, (rpm / 2500) * 100)}%` }} className={rpm > 1900 ? 'hi' : rpm > 1000 && rpm < 1600 ? 'eco' : ''} />
+        <span>{Math.round(rpm / 10) * 10} rpm</span>
+      </div>
+      <span className="dim">{truck.v < -0.2 ? 'mundur' : truck.cargo ? 'genset di bak · 27 t' : 'kosong · 12,5 t'}</span>
+      <span className="dim small">W gas · S rem (tahan saat berhenti: mundur) · A D setir · R/F naik/turun gigi · T otomatis/manual · Spasi rem tangan · H klakson · E turun</span>
     </div>
   );
 }
@@ -478,7 +492,7 @@ export function App() {
   useEffect(() => bindWorldKeys(), []);
   return (
     <>
-      <Canvas shadows dpr={[1, MAX_DPR]} camera={{ position: [10, 8, 80], fov: 55, near: 0.15, far: 3200 }} gl={{ antialias: true }}>
+      <Canvas shadows dpr={[1, MAX_DPR]} camera={{ position: [10, 8, 80], fov: 55, near: 0.15, far: 3200 }} gl={{ antialias: true, alpha: false }}>
         <WorldScene />
         {FULL ? (
           <EffectComposer>
